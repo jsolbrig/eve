@@ -11,7 +11,7 @@
 """
 
 from flask import current_app as app, abort
-from eve.utils import config, ParsedRequest
+from eve.utils import config, parse_request
 from eve.auth import requires_auth
 from eve.methods.common import (
     get_document,
@@ -159,7 +159,7 @@ def deleteitem_internal(
                     app.media.delete(original[field], resource)
 
         id = original[resource_def["id_field"]]
-        app.data.remove(resource, lookup)
+        app.data.remove(resource, req, lookup)
 
         # TODO: should attempt to delete version collection even if setting is
         # off
@@ -206,19 +206,23 @@ def delete(resource, **lookup):
     resource_def = config.DOMAIN[resource]
     getattr(app, "on_delete_resource")(resource)
     getattr(app, "on_delete_resource_%s" % resource)()
-    default_request = ParsedRequest()
+    req = parse_request(resource)
+
     if resource_def["soft_delete"]:
         # get_document should always fetch soft deleted documents from the db
         # callers must handle soft deleted documents
-        default_request.show_deleted = True
-    originals = list(app.data.find(resource, default_request, lookup))
+        req.show_deleted = True
+    originals = list(app.data.find(resource, req, lookup))
     if not originals:
         abort(404)
+
     # I add new callback as I want the framework to be retro-compatible
     getattr(app, "on_delete_resource_originals")(resource, originals, lookup)
     getattr(app, "on_delete_resource_originals_%s" % resource)(originals, lookup)
     id_field = resource_def["id_field"]
 
+    # TODO: This needs to be made more efficient.  Currently must loop over each
+    # delete.  Could, instead, use update_many to solft delete.
     if resource_def["soft_delete"]:
         # I need to check that I have at least some documents not soft_deleted
         # Otherwise, I should abort 404
@@ -241,12 +245,12 @@ def delete(resource, **lookup):
         # deleted by use of this global method (it should be disabled). Media
         # cleanup is handled at the item endpoint by the delete() method
         # (see above).
-        app.data.remove(resource, lookup)
+        app.data.remove(resource, req, lookup)
 
         # TODO: should attempt to delete version collection even if setting is
         # off
         if resource_def["versioning"] is True:
-            app.data.remove(resource + config.VERSIONS, lookup)
+            app.data.remove(resource + config.VERSIONS, req, lookup)
 
     getattr(app, "on_deleted_resource")(resource)
     getattr(app, "on_deleted_resource_%s" % resource)()
