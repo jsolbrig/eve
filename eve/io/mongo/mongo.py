@@ -36,6 +36,8 @@ from eve.utils import (
     str_type,
 )
 
+from IPython import embed as shell
+
 
 class MongoJSONEncoder(BaseJSONEncoder):
     """ Proprietary JSONEconder subclass used by the json render function.
@@ -599,7 +601,7 @@ class Mongo(DataLayer):
 
         return self._change_request(resource, id_, document, original, replace=True)
 
-    def remove(self, resource, lookup):
+    def remove(self, resource, req, lookup):
         """ Removes a document or the entire set of documents from a
         collection.
 
@@ -635,12 +637,46 @@ class Mongo(DataLayer):
             A document (dict) describing the effect of the remove
             or None if write acknowledgement is disabled.
         """
-        lookup = self._mongotize(lookup, resource)
-        datasource, filter_, _, _ = self._datasource_ex(resource, lookup)
+        # TODO: This is going to show up in "delete", "find", and "update" eventaully
+        # and should probably be pulled out into its own function.
+        if req and req.where:
+            try:
+                spec = self._sanitize(json.loads(req.where))
+            except HTTPException as e:
+                # _sanitize() is raising an HTTP exception; let it fire.
+                raise
+            except Exception as e:
+                # couldn't parse as mongo query; give the python parser a shot
+                try:
+                    spec = parse(req.where)
+                except ParseError:
+                    abort(
+                        400,
+                        description=debug_error_message(
+                            "Unagle to parse `where` clause"
+                        ),
+                    )
+
+        bad_filter = validate_filters(spec, resource)
+        if bad_filter:
+            abort(400, bad_filter)
+
+        if lookup:
+            spec = self.combine_queries(spec, lookup)
+
+        # TODO: Do I need to look at handling soft delete here, or is this
+        # done upstream?
+
+        spec = self._mongotize(spec, resource)
+
+        datasource, spec, _, _ = self._datasource_ex(resource, spec)
+
+        if req and req.if_modified_since:
+            spec[config.LAST_UPDATED] = {"$gt": req.if_modified_since}
 
         coll = self.get_collection_with_write_concern(datasource, resource)
         try:
-            coll.delete_many(filter_)
+            coll.delete_many(spec)
         except pymongo.errors.OperationFailure as e:
             # see comment in :func:`insert()`.
             self.app.logger.exception(e)
