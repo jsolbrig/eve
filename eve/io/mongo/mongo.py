@@ -37,6 +37,58 @@ from eve.utils import (
 )
 
 
+def convert_sort_request_to_dict(req):
+    """ Converts the contents of a `ParsedRequest`'s `sort` property to
+    a dict
+    """
+    client_sort = {}
+    if req and req.sort:
+        try:
+            # assume it's mongo syntax (ie. ?sort=[("name", 1)])
+            client_sort = ast.literal_eval(req.sort)
+        except ValueError:
+            # it's not mongo so let's see if it's a comma delimited string
+            # instead (ie. "?sort=-age, name").
+            sort = []
+            for sort_arg in [s.strip() for s in req.sort.split(",")]:
+                if sort_arg[0] == "-":
+                    sort.append((sort_arg[1:], -1))
+                else:
+                    sort.append((sort_arg, 1))
+            if len(sort) > 0:
+                client_sort = sort
+        except Exception as e:
+            self.app.logger.exception(e)
+            abort(400, description=debug_error_message(str(e)))
+    return client_sort
+
+
+def convert_where_request_to_dict(req):
+    """ Converts the contents of a `ParsedRequest`'s `where` property to
+    a dict
+    """
+    client_query = {}
+    if req and req.where:
+        try:
+            client_query = self._sanitize(json.loads(req.where))
+        except HTTPException as e:
+            # _sanitize() is raising an HTTP exception; let it fire.
+            raise
+        except:
+            # couldn't parse as mongo query; give the python parser a shot.
+            try:
+                client_query = parse(req.where)
+            except ParseError:
+                abort(
+                    400,
+                    description=debug_error_message(
+                        "Unable to parse `where` clause"
+                    ),
+                )
+    return client_query
+
+
+
 class MongoJSONEncoder(BaseJSONEncoder):
     """ Proprietary JSONEconder subclass used by the json render function.
     This is needed to address the encoding of special values.
@@ -209,45 +261,8 @@ class Mongo(DataLayer):
         # TODO should validate on unknown sort fields (mongo driver doesn't
         # return an error)
 
-        client_sort = {}
-        spec = {}
-
-        if req and req.sort:
-            try:
-                # assume it's mongo syntax (ie. ?sort=[("name", 1)])
-                client_sort = ast.literal_eval(req.sort)
-            except ValueError:
-                # it's not mongo so let's see if it's a comma delimited string
-                # instead (ie. "?sort=-age, name").
-                sort = []
-                for sort_arg in [s.strip() for s in req.sort.split(",")]:
-                    if sort_arg[0] == "-":
-                        sort.append((sort_arg[1:], -1))
-                    else:
-                        sort.append((sort_arg, 1))
-                if len(sort) > 0:
-                    client_sort = sort
-            except Exception as e:
-                self.app.logger.exception(e)
-                abort(400, description=debug_error_message(str(e)))
-
-        if req and req.where:
-            try:
-                spec = self._sanitize(json.loads(req.where))
-            except HTTPException as e:
-                # _sanitize() is raising an HTTP exception; let it fire.
-                raise
-            except:
-                # couldn't parse as mongo query; give the python parser a shot.
-                try:
-                    spec = parse(req.where)
-                except ParseError:
-                    abort(
-                        400,
-                        description=debug_error_message(
-                            "Unable to parse `where` clause"
-                        ),
-                    )
+        client_sort = convert_sort_request_to_dict(req)
+        spec = convert_where_request_to_dict(req)
 
         bad_filter = validate_filters(spec, resource)
         if bad_filter:
@@ -635,27 +650,7 @@ class Mongo(DataLayer):
             A document (dict) describing the effect of the remove
             or None if write acknowledgement is disabled.
         """
-        # TODO: This is going to show up in "delete", "find", and "update" eventaully
-        # and should probably be pulled out into its own function.
-        if req and req.where:
-            try:
-                spec = self._sanitize(json.loads(req.where))
-            except HTTPException as e:
-                # _sanitize() is raising an HTTP exception; let it fire.
-                raise
-            except Exception as e:
-                # couldn't parse as mongo query; give the python parser a shot
-                try:
-                    spec = parse(req.where)
-                except ParseError:
-                    abort(
-                        400,
-                        description=debug_error_message(
-                            "Unagle to parse `where` clause"
-                        ),
-                    )
-        else:
-            spec = {}
+        spec = convert_where_request_to_dict(req)
 
         bad_filter = validate_filters(spec, resource)
         if bad_filter:
