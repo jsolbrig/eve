@@ -119,6 +119,7 @@ def deleteitem_internal(
 
         # Update document in database (including version collection if needed)
         id = original[resource_def["id_field"]]
+        # raise ValueError('Got here')
         try:
             app.data.replace(resource, id, marked_document, original)
         except app.data.OriginalChangedError:
@@ -159,7 +160,7 @@ def deleteitem_internal(
                     app.media.delete(original[field], resource)
 
         id = original[resource_def["id_field"]]
-        app.data.remove(resource, req, lookup)
+        app.data.remove(resource, lookup)
 
         # TODO: should attempt to delete version collection even if setting is
         # off
@@ -207,6 +208,7 @@ def delete(resource, **lookup):
     getattr(app, "on_delete_resource")(resource)
     getattr(app, "on_delete_resource_%s" % resource)()
     req = parse_request(resource)
+    req.max_results = 0
 
     if resource_def["soft_delete"]:
         # get_document should always fetch soft deleted documents from the db
@@ -245,12 +247,12 @@ def delete(resource, **lookup):
         # deleted by use of this global method (it should be disabled). Media
         # cleanup is handled at the item endpoint by the delete() method
         # (see above).
-        app.data.remove(resource, req, lookup)
+        app.data.remove(resource, lookup, req=req)
 
         # TODO: should attempt to delete version collection even if setting is
         # off
         if resource_def["versioning"] is True:
-            app.data.remove(resource + config.VERSIONS, req, lookup)
+            app.data.remove(resource + config.VERSIONS, lookup, req=req)
 
     getattr(app, "on_deleted_resource")(resource)
     getattr(app, "on_deleted_resource_%s" % resource)()

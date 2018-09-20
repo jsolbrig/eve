@@ -36,8 +36,6 @@ from eve.utils import (
     str_type,
 )
 
-from IPython import embed as shell
-
 
 class MongoJSONEncoder(BaseJSONEncoder):
     """ Proprietary JSONEconder subclass used by the json render function.
@@ -601,7 +599,7 @@ class Mongo(DataLayer):
 
         return self._change_request(resource, id_, document, original, replace=True)
 
-    def remove(self, resource, req, lookup):
+    def remove(self, resource, lookup, req=None):
         """ Removes a document or the entire set of documents from a
         collection.
 
@@ -656,6 +654,8 @@ class Mongo(DataLayer):
                             "Unagle to parse `where` clause"
                         ),
                     )
+        else:
+            spec = {}
 
         bad_filter = validate_filters(spec, resource)
         if bad_filter:
